@@ -1,12 +1,11 @@
 #!/usr/bin/env python3
 import os
 import logging
+import re
 from dotenv import load_dotenv
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, CallbackQueryHandler
-from phone_enum_advanced import PhoneEnumeration
-import asyncio
-from concurrent.futures import ThreadPoolExecutor
+from phone_enum import PhoneEnumeration
 
 # Load environment
 load_dotenv()
@@ -16,17 +15,16 @@ if not TOKEN:
     raise ValueError("TELEGRAM_BOT_TOKEN not set in environment")
 
 # Logging
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO
+)
 logger = logging.getLogger(__name__)
-
-# Global executor for async operations
-executor = ThreadPoolExecutor(max_workers=4)
 
 
 class PhoneEnumBot:
     def __init__(self):
-        self.enum = PhoneEnumeration(timeout=20, threads=8)
-        self.app = None
+        self.enum = PhoneEnumeration(timeout=15, threads=5)
     
     async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Start command"""
@@ -37,16 +35,16 @@ class PhoneEnumBot:
 
 **ব্যবহার করুন:**
 শুধু একটি ফোন নম্বর পাঠান এবং দেখুন:
-- WhatsApp Account
-- Telegram Account
-- Facebook Profile
-- Instagram Account
-- Twitter/X Account
-- TikTok Account
-- LinkedIn Profile
-- Viber Status
-- TrueCaller Info
-- Possible Emails
+- ✅ WhatsApp Account
+- ✅ Telegram Account  
+- ✅ Facebook Profile
+- ✅ Instagram Account
+- ✅ Twitter/X Account
+- ✅ TikTok Account
+- ✅ LinkedIn Profile
+- ✅ Viber Status
+- ✅ TrueCaller Info
+- ✅ Possible Emails
 
 ⚠️ **শুধুমাত্র আইনি উদ্দেশ্যে ব্যবহার করুন।**
 
@@ -91,7 +89,7 @@ class PhoneEnumBot:
         
         elif query.data == 'about':
             about_text = """
-📱 **Phone Enumeration Bot v1.0**
+📱 **Phone Enumeration Bot v2.0**
 
 এই বট ব্যবহার করে:
 - BeautifulSoup (Web Scraping)
@@ -128,20 +126,20 @@ class PhoneEnumBot:
         # WhatsApp
         wa = platforms.get('whatsapp', {})
         if wa.get('found'):
-            output += f"""
-✅ **WhatsApp**
+            output += f"""✅ **WhatsApp**
    • স্ট্যাটাস: {'সক্রিয়' if wa.get('active') else 'নিষ্ক্রিয়'}
    • লিংক: {wa.get('profile', {}).get('link', 'N/A')}
+
 """
             found_count += 1
         
         # Telegram
         tg = platforms.get('telegram', {})
         if tg.get('found'):
-            output += f"""
-✅ **Telegram**
+            output += f"""✅ **Telegram**
    • ইউজারনেম: @{tg.get('username', 'N/A')}
    • বায়ো: {tg.get('bio', 'N/A')}
+
 """
             found_count += 1
         
@@ -150,7 +148,8 @@ class PhoneEnumBot:
         if fb.get('found') and fb.get('profiles'):
             output += "✅ **Facebook**\n"
             for i, profile in enumerate(fb['profiles'][:2], 1):
-                output += f"   • {i}. {profile.get('name', 'N/A')}\n   Link: {profile.get('link', 'N/A')}\n"
+                output += f"   • {i}. {profile.get('name', 'N/A')}\n"
+            output += "\n"
             found_count += 1
         
         # Instagram
@@ -160,7 +159,7 @@ class PhoneEnumBot:
             for i, account in enumerate(ig['accounts'][:2], 1):
                 verified = "✓" if account.get('is_verified') else ""
                 output += f"   • {i}. @{account.get('username', 'N/A')} {verified}\n"
-                output += f"      নাম: {account.get('full_name', 'N/A')}\n"
+            output += "\n"
             found_count += 1
         
         # Twitter
@@ -169,6 +168,7 @@ class PhoneEnumBot:
             output += "✅ **Twitter/X**\n"
             for i, account in enumerate(tw['accounts'][:2], 1):
                 output += f"   • {i}. @{account.get('username', 'N/A')}\n"
+            output += "\n"
             found_count += 1
         
         # TikTok
@@ -177,16 +177,17 @@ class PhoneEnumBot:
             output += "✅ **TikTok**\n"
             for i, account in enumerate(tk['accounts'][:2], 1):
                 output += f"   • {i}. @{account.get('username', 'N/A')}\n"
+            output += "\n"
             found_count += 1
         
         # TrueCaller
         tc = platforms.get('truecaller', {})
         if tc.get('found'):
-            output += f"""
-✅ **TrueCaller**
+            output += f"""✅ **TrueCaller**
    • নাম: {tc.get('name', 'N/A')}
    • ক্যারিয়ার: {tc.get('carrier', 'N/A')}
    • দেশ: {tc.get('country', 'N/A')}
+
 """
             found_count += 1
         
@@ -196,28 +197,28 @@ class PhoneEnumBot:
             output += "✅ **LinkedIn**\n"
             for i, profile in enumerate(ln['profiles'][:2], 1):
                 output += f"   • {i}. {profile.get('name', 'N/A')}\n"
+            output += "\n"
             found_count += 1
         
         # Viber
         vb = platforms.get('viber', {})
         if vb.get('found'):
-            output += f"""
-✅ **Viber**
+            output += f"""✅ **Viber**
    • স্ট্যাটাস: {'সক্রিয়' if vb.get('active') else 'নিষ্ক্রিয়'}
-   • লিংক: {vb.get('viber_link', 'N/A')}
+
 """
             found_count += 1
         
         # Emails
         emails = results.get('emails', [])
         if emails:
-            output += "\n✅ **সম্ভাব্য ইমেইল:**\n"
+            output += "✅ **সম্ভাব্য ইমেইল:**\n"
             for email in emails[:3]:
                 output += f"   • {email}\n"
+            output += "\n"
         
         # Summary
-        output += f"""
-{'─' * 40}
+        output += f"""{'─' * 40}
 📊 **সারসংক্ষেপ:**
    • মোট অ্যাকাউন্ট পাওয়া: {found_count}
    • ঝুঁকি স্কোর: {results.get('risk_score', 0):.1f}%
@@ -248,12 +249,8 @@ class PhoneEnumBot:
         )
         
         try:
-            # Run enumeration in executor to avoid blocking
-            loop = asyncio.get_event_loop()
-            results = await loop.run_in_executor(
-                executor,
-                lambda: self.enum.enumerate_all(phone)
-            )
+            # Run enumeration
+            results = self.enum.enumerate_all(phone)
             
             # Format and send results
             formatted_results = self._format_results(results)
@@ -275,36 +272,36 @@ class PhoneEnumBot:
             await processing_msg.edit_text(
                 f"❌ ত্রুটি ঘটেছে:\n{str(e)}\n\nকিছুক্ষণ পর আবার চেষ্টা করুন।"
             )
+
+
+async def main():
+    """Main async function"""
+    bot = PhoneEnumBot()
     
-    async def setup(self) -> None:
-        """Setup bot handlers"""
-        self.app = Application.builder().token(TOKEN).build()
-        
-        # Commands
-        self.app.add_handler(CommandHandler("start", self.start))
-        
-        # Callbacks
-        self.app.add_handler(CallbackQueryHandler(self.handle_button))
-        
-        # Message handler for phone numbers
-        self.app.add_handler(
-            MessageHandler(
-                filters.TEXT & ~filters.COMMAND,
-                self.handle_phone_number
-            )
+    # Create application
+    app = Application.builder().token(TOKEN).build()
+    
+    # Commands
+    app.add_handler(CommandHandler("start", bot.start))
+    
+    # Callbacks
+    app.add_handler(CallbackQueryHandler(bot.handle_button))
+    
+    # Message handler for phone numbers
+    app.add_handler(
+        MessageHandler(
+            filters.TEXT & ~filters.COMMAND,
+            bot.handle_phone_number
         )
-        
-        logger.info("Bot handlers setup complete")
+    )
     
-    async def run(self) -> None:
-        """Run bot"""
-        await self.setup()
-        logger.info("Starting bot...")
-        await self.app.run_polling()
+    logger.info("Bot started...")
+    
+    # Run polling
+    await app.run_polling()
 
 
 if __name__ == '__main__':
-    import re
+    import asyncio
     
-    bot = PhoneEnumBot()
-    asyncio.run(bot.run())
+    asyncio.run(main())
