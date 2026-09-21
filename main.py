@@ -1,279 +1,310 @@
 #!/usr/bin/env python3
 import os
-import json
 import logging
+from dotenv import load_dotenv
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
-from telegram.error import TelegramError
+from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, CallbackQueryHandler
+from phone_enum_advanced import PhoneEnumeration
 import asyncio
-from phone_enum import PhoneEnumeration
-import re
+from concurrent.futures import ThreadPoolExecutor
+
+# Load environment
+load_dotenv()
+
+TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+if not TOKEN:
+    raise ValueError("TELEGRAM_BOT_TOKEN not set in environment")
 
 # Logging
-logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO
-)
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Telegram Bot Token (set as environment variable)
-TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
-WEBHOOK_URL = os.getenv('WEBHOOK_URL')  # Your Render app URL
+# Global executor for async operations
+executor = ThreadPoolExecutor(max_workers=4)
 
-# Admin user IDs (add yours)
-ADMIN_IDS = [int(x) for x in os.getenv('ADMIN_IDS', '').split(',') if x]
 
-class TelegramPhoneEnumBot:
+class PhoneEnumBot:
     def __init__(self):
-        self.enum_tool = PhoneEnumeration(timeout=15, threads=5)
-        self.active_enums = {}
+        self.enum = PhoneEnumeration(timeout=20, threads=8)
+        self.app = None
     
-    async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+    async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Start command"""
-        user_id = update.effective_user.id
-        
         welcome_text = """
-🔍 *Phone Enumeration Bot*
+🔍 **Phone Enumeration Bot** 📱
 
-এই বট এর মাধ্যমে যেকোনো নম্বর দিয়ে সব সোশ্যাল মিডিয়া অ্যাকাউন্ট খুঁজে বের করুন।
+এই বটটি একটি ফোন নম্বরের সাথে যুক্ত সব কিছু খুঁজে বের করে।
 
-📱 *কীভাবে ব্যবহার করবেন:*
+**ব্যবহার করুন:**
+শুধু একটি ফোন নম্বর পাঠান এবং দেখুন:
+- WhatsApp Account
+- Telegram Account
+- Facebook Profile
+- Instagram Account
+- Twitter/X Account
+- TikTok Account
+- LinkedIn Profile
+- Viber Status
+- TrueCaller Info
+- Possible Emails
 
-1️⃣ একটি ফোন নম্বর পাঠান:
-`+8801900000000` অথবা `01900000000`
+⚠️ **শুধুমাত্র আইনি উদ্দেশ্যে ব্যবহার করুন।**
 
-2️⃣ বট সব প্ল্যাটফর্মে খুঁজবে:
-• Facebook
-• WhatsApp
-• Telegram
-• Instagram
-• LinkedIn
-• TrueCaller
-• Viber
-• TikTok
-• Twitter
-
-3️⃣ কয়েক সেকেন্ডে সব ফলাফল পাবেন ✓
-
-⚠️ শুধুমাত্র আইনি ব্যবহারের জন্য।
-
-*এখনই শুরু করুন:*
-"""
+একটি ফোন নম্বর পাঠান শুরু করতে:
+👉 +880 1900 000 000 (উদাহরণ)
+        """
+        
+        keyboard = [
+            [InlineKeyboardButton("সাহায্য পান", callback_data='help'),
+             InlineKeyboardButton("সম্পর্কে", callback_data='about')]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
         
         await update.message.reply_text(
             welcome_text,
-            parse_mode='Markdown',
-            disable_web_page_preview=True
+            reply_markup=reply_markup,
+            parse_mode='Markdown'
         )
     
-    async def handle_phone_input(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Handle phone number input"""
-        user_id = update.effective_user.id
-        message_text = update.message.text.strip()
+    async def handle_button(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle inline buttons"""
+        query = update.callback_query
+        await query.answer()
         
-        # Validate phone number
-        if not self._is_valid_phone(message_text):
+        if query.data == 'help':
+            help_text = """
+**সাহায্য:**
+
+1️⃣ ফোন নম্বর পাঠান (যেকোনো ফরম্যাটে)
+2️⃣ বট স্বয়ংক্রিয়ভাবে খোঁজ করবে
+3️⃣ সব প্ল্যাটফর্মে একাউন্ট দেখাবে
+
+**ফর্ম্যাট:**
+- +8801900000000
+- 01900000000
+- 8801900000000
+- 1900000000
+
+সবগুলোই কাজ করে! ✅
+            """
+            await query.edit_message_text(help_text, parse_mode='Markdown')
+        
+        elif query.data == 'about':
+            about_text = """
+📱 **Phone Enumeration Bot v1.0**
+
+এই বট ব্যবহার করে:
+- BeautifulSoup (Web Scraping)
+- Requests (HTTP)
+- Telegram Bot API
+- OSINT Techniques
+
+**নির্মাতা:** DADA Technology
+
+⚠️ **দায়বদ্ধতা:** শুধুমাত্র আইনি ব্যবহার।
+            """
+            await query.edit_message_text(about_text, parse_mode='Markdown')
+    
+    def _format_results(self, results: dict) -> str:
+        """Format enumeration results beautifully"""
+        phone = results.get('phone', 'N/A')
+        normalized = results.get('normalized_phone', 'N/A')
+        
+        output = f"""
+╔═══════════════════════════════════════╗
+║  📱 PHONE ENUMERATION RESULTS  📱     ║
+╚═══════════════════════════════════════╝
+
+📞 **আসল নম্বর:** {phone}
+🌍 **স্বাভাবিক ফরম্যাট:** {normalized}
+
+{'─' * 40}
+
+"""
+        
+        platforms = results.get('platforms', {})
+        found_count = 0
+        
+        # WhatsApp
+        wa = platforms.get('whatsapp', {})
+        if wa.get('found'):
+            output += f"""
+✅ **WhatsApp**
+   • স্ট্যাটাস: {'সক্রিয়' if wa.get('active') else 'নিষ্ক্রিয়'}
+   • লিংক: {wa.get('profile', {}).get('link', 'N/A')}
+"""
+            found_count += 1
+        
+        # Telegram
+        tg = platforms.get('telegram', {})
+        if tg.get('found'):
+            output += f"""
+✅ **Telegram**
+   • ইউজারনেম: @{tg.get('username', 'N/A')}
+   • বায়ো: {tg.get('bio', 'N/A')}
+"""
+            found_count += 1
+        
+        # Facebook
+        fb = platforms.get('facebook', {})
+        if fb.get('found') and fb.get('profiles'):
+            output += "✅ **Facebook**\n"
+            for i, profile in enumerate(fb['profiles'][:2], 1):
+                output += f"   • {i}. {profile.get('name', 'N/A')}\n   Link: {profile.get('link', 'N/A')}\n"
+            found_count += 1
+        
+        # Instagram
+        ig = platforms.get('instagram', {})
+        if ig.get('found') and ig.get('accounts'):
+            output += "✅ **Instagram**\n"
+            for i, account in enumerate(ig['accounts'][:2], 1):
+                verified = "✓" if account.get('is_verified') else ""
+                output += f"   • {i}. @{account.get('username', 'N/A')} {verified}\n"
+                output += f"      নাম: {account.get('full_name', 'N/A')}\n"
+            found_count += 1
+        
+        # Twitter
+        tw = platforms.get('twitter', {})
+        if tw.get('found') and tw.get('accounts'):
+            output += "✅ **Twitter/X**\n"
+            for i, account in enumerate(tw['accounts'][:2], 1):
+                output += f"   • {i}. @{account.get('username', 'N/A')}\n"
+            found_count += 1
+        
+        # TikTok
+        tk = platforms.get('tiktok', {})
+        if tk.get('found') and tk.get('accounts'):
+            output += "✅ **TikTok**\n"
+            for i, account in enumerate(tk['accounts'][:2], 1):
+                output += f"   • {i}. @{account.get('username', 'N/A')}\n"
+            found_count += 1
+        
+        # TrueCaller
+        tc = platforms.get('truecaller', {})
+        if tc.get('found'):
+            output += f"""
+✅ **TrueCaller**
+   • নাম: {tc.get('name', 'N/A')}
+   • ক্যারিয়ার: {tc.get('carrier', 'N/A')}
+   • দেশ: {tc.get('country', 'N/A')}
+"""
+            found_count += 1
+        
+        # LinkedIn
+        ln = platforms.get('linkedin', {})
+        if ln.get('found') and ln.get('profiles'):
+            output += "✅ **LinkedIn**\n"
+            for i, profile in enumerate(ln['profiles'][:2], 1):
+                output += f"   • {i}. {profile.get('name', 'N/A')}\n"
+            found_count += 1
+        
+        # Viber
+        vb = platforms.get('viber', {})
+        if vb.get('found'):
+            output += f"""
+✅ **Viber**
+   • স্ট্যাটাস: {'সক্রিয়' if vb.get('active') else 'নিষ্ক্রিয়'}
+   • লিংক: {vb.get('viber_link', 'N/A')}
+"""
+            found_count += 1
+        
+        # Emails
+        emails = results.get('emails', [])
+        if emails:
+            output += "\n✅ **সম্ভাব্য ইমেইল:**\n"
+            for email in emails[:3]:
+                output += f"   • {email}\n"
+        
+        # Summary
+        output += f"""
+{'─' * 40}
+📊 **সারসংক্ষেপ:**
+   • মোট অ্যাকাউন্ট পাওয়া: {found_count}
+   • ঝুঁকি স্কোর: {results.get('risk_score', 0):.1f}%
+   • স্ট্যাটাস: {results.get('status', 'Unknown')}
+
+⚠️ শুধুমাত্র আইনি উদ্দেশ্যে ব্যবহার করুন।
+        """
+        
+        return output
+    
+    async def handle_phone_number(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle phone number input"""
+        message = update.message.text.strip()
+        
+        # Validate phone format
+        phone_match = re.match(r'[\d+\-\s()]+', message)
+        if not phone_match or len(re.sub(r'\D', '', message)) < 10:
             await update.message.reply_text(
-                "❌ Invalid phone number.\n\nব্যবহার করুন:\n`+8801900000000`\nঅথবা\n`01900000000`",
-                parse_mode='Markdown'
+                "❌ অবৈধ ফোন নম্বর। সঠিক ফরম্যাটে পাঠান:\n+880190XXXXXXX অথবা 01900XXXXXX"
             )
             return
         
-        # Normalize
-        phone = self.enum_tool.normalize_phone(message_text)
+        phone = message
         
-        # Send loading message
-        loading_msg = await update.message.reply_text(
-            f"🔍 Searching for accounts linked to: {phone}\n\n"
-            f"এটি কয়েক সেকেন্ড সময় নিতে পারে...",
-            parse_mode='Markdown'
+        # Show processing message
+        processing_msg = await update.message.reply_text(
+            f"🔍 খোঁজা হচ্ছে: {phone}\n\n⏳ এটি কয়েক সেকেন্ড সময় নিতে পারে..."
         )
         
-        # Store active enum
-        self.active_enums[user_id] = {
-            'phone': phone,
-            'status': 'running',
-            'message_id': loading_msg.message_id
-        }
-        
         try:
-            # Run enumeration (async)
+            # Run enumeration in executor to avoid blocking
             loop = asyncio.get_event_loop()
-            await loop.run_in_executor(None, self.enum_tool.enumerate_all, phone)
-            
-            # Format results
-            results_text = self._format_results(self.enum_tool.results)
-            
-            # Send results
-            await context.bot.edit_message_text(
-                chat_id=update.effective_chat.id,
-                message_id=loading_msg.message_id,
-                text=results_text,
-                parse_mode='Markdown',
-                disable_web_page_preview=True
+            results = await loop.run_in_executor(
+                executor,
+                lambda: self.enum.enumerate_all(phone)
             )
             
-            # Save results to file
-            self._save_results(phone, self.enum_tool.results)
+            # Format and send results
+            formatted_results = self._format_results(results)
             
-            self.active_enums[user_id]['status'] = 'completed'
+            # Split if too long (Telegram limit)
+            if len(formatted_results) > 4000:
+                messages = [formatted_results[i:i+4000] for i in range(0, len(formatted_results), 4000)]
+                await processing_msg.delete()
+                
+                for msg_part in messages:
+                    await update.message.reply_text(msg_part, parse_mode='Markdown')
+            else:
+                await processing_msg.edit_text(formatted_results, parse_mode='Markdown')
+            
+            logger.info(f"Enumeration completed for {phone}")
         
         except Exception as e:
-            await context.bot.edit_message_text(
-                chat_id=update.effective_chat.id,
-                message_id=loading_msg.message_id,
-                text=f"❌ Error: {str(e)[:100]}",
-                parse_mode='Markdown'
+            logger.error(f"Error during enumeration: {e}")
+            await processing_msg.edit_text(
+                f"❌ ত্রুটি ঘটেছে:\n{str(e)}\n\nকিছুক্ষণ পর আবার চেষ্টা করুন।"
             )
-            self.active_enums[user_id]['status'] = 'error'
     
-    def _is_valid_phone(self, phone: str) -> bool:
-        """Validate phone number format"""
-        cleaned = re.sub(r'\D', '', phone)
-        return 10 <= len(cleaned) <= 13
+    async def setup(self) -> None:
+        """Setup bot handlers"""
+        self.app = Application.builder().token(TOKEN).build()
+        
+        # Commands
+        self.app.add_handler(CommandHandler("start", self.start))
+        
+        # Callbacks
+        self.app.add_handler(CallbackQueryHandler(self.handle_button))
+        
+        # Message handler for phone numbers
+        self.app.add_handler(
+            MessageHandler(
+                filters.TEXT & ~filters.COMMAND,
+                self.handle_phone_number
+            )
+        )
+        
+        logger.info("Bot handlers setup complete")
     
-    def _format_results(self, results: dict) -> str:
-        """Format results for Telegram"""
-        phone = results.get('phone', 'N/A')
-        
-        text = f"📱 *Phone Enumeration Results*\n"
-        text += f"*Number:* `{phone}`\n\n"
-        text += "━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-        
-        found_count = 0
-        
-        # Facebook
-        fb = results.get('facebook', {})
-        if fb.get('accounts'):
-            found_count += len(fb['accounts'])
-            text += "✅ *FACEBOOK* Found\n"
-            for acc in fb['accounts'][:3]:
-                url = acc.get('profile_url', '#')
-                text += f"  • [{acc.get('profile_id')}]({url})\n"
-            if len(fb['accounts']) > 3:
-                text += f"  ... +{len(fb['accounts'])-3} more\n"
-            text += "\n"
-        
-        # WhatsApp
-        wa = results.get('whatsapp', {})
-        if wa.get('account_active'):
-            found_count += 1
-            text += "✅ *WHATSAPP* Active\n"
-            if wa.get('profile_info', {}).get('status'):
-                text += f"  • Status: `{wa['profile_info']['status']}`\n"
-            if wa.get('profile_info', {}).get('name'):
-                text += f"  • Name: `{wa['profile_info']['name']}`\n"
-            wa_link = wa.get('profile_info', {}).get('wa_link')
-            if wa_link:
-                text += f"  • [Open WhatsApp]({wa_link})\n"
-            text += "\n"
-        
-        # Telegram
-        tg = results.get('telegram', {})
-        if tg.get('accounts'):
-            found_count += len(tg['accounts'])
-            text += "✅ *TELEGRAM* Found\n"
-            for acc in tg['accounts'][:3]:
-                url = acc.get('url', '#')
-                text += f"  • [@{acc.get('username')}]({url})\n"
-                if acc.get('bio'):
-                    text += f"    Bio: `{acc['bio'][:50]}`\n"
-            text += "\n"
-        
-        # Instagram
-        ig = results.get('instagram', {})
-        if ig.get('accounts'):
-            found_count += len(ig['accounts'])
-            text += "✅ *INSTAGRAM* Found\n"
-            for acc in ig['accounts'][:3]:
-                url = acc.get('profile_url', '#')
-                text += f"  • [@{acc.get('username')}]({url})\n"
-            text += "\n"
-        
-        # LinkedIn
-        li = results.get('linkedin', {})
-        if li.get('profiles'):
-            found_count += len(li['profiles'])
-            text += "✅ *LINKEDIN* Found\n"
-            for prof in li['profiles'][:3]:
-                url = prof.get('profile_url', '#')
-                text += f"  • [{prof.get('profile_id')}]({url})\n"
-            text += "\n"
-        
-        # TrueCaller
-        tc = results.get('truecaller', {})
-        if tc.get('profile'):
-            found_count += 1
-            text += "✅ *TRUECALLER* Found\n"
-            text += f"  • Name: `{tc['profile'].get('name')}`\n"
-            if tc['profile'].get('category'):
-                text += f"  • Category: `{tc['profile']['category']}`\n"
-            text += "\n"
-        
-        # Viber
-        vb = results.get('viber', {})
-        if vb.get('account_active'):
-            found_count += 1
-            text += "✅ *VIBER* Active\n"
-            if vb.get('viber_link'):
-                text += f"  • [Open Viber]({vb['viber_link']})\n"
-            text += "\n"
-        
-        # TikTok
-        tt = results.get('tiktok', {})
-        if tt.get('accounts'):
-            found_count += len(tt['accounts'])
-            text += "✅ *TIKTOK* Found\n"
-            for acc in tt['accounts'][:3]:
-                url = acc.get('profile_url', '#')
-                text += f"  • [@{acc.get('username')}]({url})\n"
-            text += "\n"
-        
-        # Twitter
-        tw = results.get('twitter', {})
-        if tw.get('accounts'):
-            found_count += len(tw['accounts'])
-            text += "✅ *TWITTER* Found\n"
-            for acc in tw['accounts'][:3]:
-                url = acc.get('profile_url', '#')
-                text += f"  • [@{acc.get('handle')}]({url})\n"
-            text += "\n"
-        
-        # Summary
-        text += "━━━━━━━━━━━━━━━━━━━━━━━\n"
-        text += f"*Total Accounts Found: {found_count}*\n\n"
-        text += "⚠️ শুধুমাত্র আইনি ব্যবহারের জন্য।"
-        
-        return text
-    
-    def _save_results(self, phone: str, results: dict):
-        """Save results to file"""
-        phone_clean = re.sub(r'\D', '', phone)
-        filename = f"results_{phone_clean}.json"
-        
-        try:
-            with open(filename, 'w', encoding='utf-8') as f:
-                json.dump(results, f, indent=2, ensure_ascii=False)
-            logger.info(f"Results saved: {filename}")
-        except Exception as e:
-            logger.error(f"Failed to save results: {e}")
-    
-    async def error_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Error handler"""
-        logger.error(msg="Exception while handling an update:", exc_info=context.error)
-    
-    def run(self):
-        """Run the bot"""
-        app = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
-        
-        # Handlers
-        app.add_handler(CommandHandler("start", self.start))
-        app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_phone_input))
-        app.add_error_handler(self.error_handler)
-        
-        # Start bot
-        app.run_polling(allowed_updates=Update.ALL_TYPES)
+    async def run(self) -> None:
+        """Run bot"""
+        await self.setup()
+        logger.info("Starting bot...")
+        await self.app.run_polling()
+
 
 if __name__ == '__main__':
-    bot = TelegramPhoneEnumBot()
-    bot.run()
+    import re
+    
+    bot = PhoneEnumBot()
+    asyncio.run(bot.run())
