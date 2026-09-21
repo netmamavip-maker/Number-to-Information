@@ -25,6 +25,7 @@ logger = logging.getLogger(__name__)
 class PhoneEnumBot:
     def __init__(self):
         self.enum = PhoneEnumeration(timeout=15, threads=5)
+        self.app = None
     
     async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Start command"""
@@ -46,10 +47,10 @@ class PhoneEnumBot:
 - ✅ TrueCaller Info
 - ✅ Possible Emails
 
-⚠️ **শুধুমাত্র আইনি উদ্দেশ্যে ব্যবহার করুন।**
+⚠ **শুধুমাত্র আইনি উদ্দেশ্যে ব্যবহার করুন।**
 
 একটি ফোন নম্বর পাঠান শুরু করতে:
-👉 +880 1900 000 000 (উদাহরণ)
+👉 +880 1900 000 000
         """
         
         keyboard = [
@@ -73,9 +74,9 @@ class PhoneEnumBot:
             help_text = """
 **সাহায্য:**
 
-1️⃣ ফোন নম্বর পাঠান (যেকোনো ফরম্যাটে)
-2️⃣ বট স্বয়ংক্রিয়ভাবে খোঁজ করবে
-3️⃣ সব প্ল্যাটফর্মে একাউন্ট দেখাবে
+1⃣ ফোন নম্বর পাঠান (যেকোনো ফরম্যাটে)
+2⃣ বট স্বয়ংক্রিয়ভাবে খোঁজ করবে
+3⃣ সব প্ল্যাটফর্মে একাউন্ট দেখাবে
 
 **ফর্ম্যাট:**
 - +8801900000000
@@ -99,7 +100,7 @@ class PhoneEnumBot:
 
 **নির্মাতা:** DADA Technology
 
-⚠️ **দায়বদ্ধতা:** শুধুমাত্র আইনি ব্যবহার।
+⚠ **দায়বদ্ধতা:** শুধুমাত্র আইনি ব্যবহার।
             """
             await query.edit_message_text(about_text, parse_mode='Markdown')
     
@@ -224,7 +225,7 @@ class PhoneEnumBot:
    • ঝুঁকি স্কোর: {results.get('risk_score', 0):.1f}%
    • স্ট্যাটাস: {results.get('status', 'Unknown')}
 
-⚠️ শুধুমাত্র আইনি উদ্দেশ্যে ব্যবহার করুন।
+⚠ শুধুমাত্র আইনি উদ্দেশ্যে ব্যবহার করুন।
         """
         
         return output
@@ -272,36 +273,47 @@ class PhoneEnumBot:
             await processing_msg.edit_text(
                 f"❌ ত্রুটি ঘটেছে:\n{str(e)}\n\nকিছুক্ষণ পর আবার চেষ্টা করুন।"
             )
-
-
-async def main():
-    """Main async function"""
-    bot = PhoneEnumBot()
     
-    # Create application
-    app = Application.builder().token(TOKEN).build()
-    
-    # Commands
-    app.add_handler(CommandHandler("start", bot.start))
-    
-    # Callbacks
-    app.add_handler(CallbackQueryHandler(bot.handle_button))
-    
-    # Message handler for phone numbers
-    app.add_handler(
-        MessageHandler(
-            filters.TEXT & ~filters.COMMAND,
-            bot.handle_phone_number
+    def setup_handlers(self):
+        """Setup bot handlers"""
+        if not self.app:
+            self.app = Application.builder().token(TOKEN).build()
+        
+        # Commands
+        self.app.add_handler(CommandHandler("start", self.start))
+        
+        # Callbacks
+        self.app.add_handler(CallbackQueryHandler(self.handle_button))
+        
+        # Message handler for phone numbers
+        self.app.add_handler(
+            MessageHandler(
+                filters.TEXT & ~filters.COMMAND,
+                self.handle_phone_number
+            )
         )
-    )
-    
-    logger.info("Bot started...")
-    
-    # Run polling
-    await app.run_polling()
+        
+        logger.info("Bot handlers setup complete")
+        return self.app
+
+
+# Global bot instance
+bot = PhoneEnumBot()
 
 
 if __name__ == '__main__':
-    import asyncio
-    
-    asyncio.run(main())
+    try:
+        logger.info("Starting Phone Enumeration Bot...")
+        
+        # Setup handlers and get app
+        app = bot.setup_handlers()
+        
+        # Run polling (no asyncio.run wrapper)
+        logger.info("Bot polling started")
+        app.run_polling()
+        
+    except KeyboardInterrupt:
+        logger.info("Bot stopped by user")
+    except Exception as e:
+        logger.error(f"Bot error: {e}")
+        raise
